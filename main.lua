@@ -8,6 +8,8 @@ local M = {
 	_parent = {},
 	_preview = {},
 	_panes = { parent = true, current = true, preview = true },
+	_dirs = {},
+	_enabled = true,
 	_on_file = nil,
 	_patched = false,
 }
@@ -210,19 +212,72 @@ local function pane_of(file)
 	return "parent"
 end
 
+-- Listing directory of a pane (for dirs rules). Nil-safe outside render.
+local function dir_of(pane)
+	local ok, dir = pcall(function()
+		if pane == "current" then
+			return tostring(cx.active.current.cwd)
+		elseif pane == "preview" then
+			local pf = cx.active.preview.folder
+			return pf and tostring(pf.cwd)
+		else
+			local pp = cx.active.parent
+			return pp and tostring(pp.cwd)
+		end
+	end)
+	return ok and dir or nil
+end
+
+local function expand_home(p)
+	if p:sub(1, 2) == "~/" then
+		return (os.getenv("HOME") or "") .. p:sub(2)
+	end
+	return p
+end
+
+-- First dirs rule matching a listing dir. A rule matches when the expanded
+-- pattern equals the dir, is a path-prefix of it, or matches as a Lua pattern
+-- ending on a path boundary. Rule values: false = off, table = overrides.
+local function dir_rule(dir)
+	for pat, rule in pairs(M._dirs) do
+		local p = expand_home(pat)
+		if dir == p or dir:sub(1, #p + 1) == p .. "/" then
+			return rule
+		end
+		local _, e = dir:find(p)
+		if e and (e >= #dir or dir:sub(e + 1, e + 1) == "/") then
+			return rule
+		end
+	end
+end
+
 local function pick(file)
+	if not M._enabled then
+		return nil
+	end
 	local pane = pane_of(file)
 	if not M._panes[pane] then
 		return nil
 	end
-	local list = M[pane == "current" and "_current" or pane == "preview" and "_preview" or "_parent"]
-	if #list == 0 then
+	local rule = dir_of(pane) and dir_rule(dir_of(pane))
+	if rule == false then
+		return nil
+	end
+	if rule and rule.panes and rule.panes[pane] == false then
+		return nil
+	end
+	local list = pane == "current" and "_current" or pane == "preview" and "_preview" or "_parent"
+	if type(rule) == "table" and rule[pane] ~= nil and #rule[pane] > 0 then
+		list = rule[pane]
+	elseif #M[list] == 0 then
 		list = M._rows
+	else
+		list = M[list]
 	end
-	local default
-	if #list > 0 then
-		default = build(list[(file.idx - 1) % #list + 1])
+	if #list == 0 then
+		return nil
 	end
+	local default = build(list[(file.idx - 1) % #list + 1])
 	if M._on_file then
 		return M._on_file(file, default) or default
 	end
@@ -254,7 +309,57 @@ function M:_patch()
 	self._patched = true
 end
 
----@param opts { base?: string, rows?: table[], current?: table[], parent?: table[], preview?: table[], panes?: { parent?: boolean, current?: boolean, preview?: boolean }, on_file?: fun(file: userdata, default: userdata?): userdata? }
+-- Command entry: `plugin zebra [--sync] toggle` / `plugin zebra [--sync] toggle-pane current|parent|preview`.
+-- The command loader runs a fresh copy of this file; mutate the LIVE module
+-- (the one user setup() configured) so the installed render hooks see it.
+function M:entry(job)
+	local live = package.loaded and package.loaded.zebra
+	if not (live and live ~= M and live._patched) then
+		live = M
+	end
+	local a = job.args
+	local cmd, arg
+	if type(a) == "table" then
+		cmd, arg = a[1], a[2]
+	else
+		cmd, arg = tostring(a or ""):match("^(%S*)%s*(.-)%s*$")
+	end
+	if cmd == "toggle" then
+		live._enabled = not live._enabled
+		pcall(ya.notify, {
+			title = "zebra",
+			content = live._enabled and "stripes on" or "stripes off",
+			level = "info",
+			timeout = 1,
+		})
+	elseif cmd == "toggle-pane" then
+		if live._panes[arg] == nil then
+			pcall(ya.notify, {
+				title = "zebra",
+				content = "usage: toggle-pane current|parent|preview",
+				level = "warn",
+				timeout = 2,
+			})
+			return
+		end
+		live._panes[arg] = not live._panes[arg]
+		pcall(ya.notify, {
+			title = "zebra",
+			content = arg .. " stripes " .. (live._panes[arg] and "on" or "off"),
+			level = "info",
+			timeout = 1,
+		})
+	else
+		pcall(ya.notify, {
+			title = "zebra",
+			content = "usage: toggle | toggle-pane current|parent|preview",
+			level = "warn",
+			timeout = 2,
+		})
+	end
+end
+
+---@param opts { base?: string, rows?: table[], current?: table[], parent?: table[], preview?: table[], panes?: { parent?: boolean, current?: boolean, preview?: boolean }, dirs?: { [string]: boolean|table }, on_file?: fun(file: userdata, default: userdata?): userdata? }
 function M:setup(opts)
 	opts = opts or {}
 	assert(opts.base == nil or type(opts.base) == "string", "zebra: base must be a hex string or nil")
@@ -276,6 +381,32 @@ function M:setup(opts)
 	self._current = compile(opts.current or {}, "current")
 	self._parent = compile(opts.parent or {}, "parent")
 	self._preview = compile(opts.preview or {}, "preview")
+
+	if opts.dirs ~= nil then
+		assert(type(opts.dirs) == "table", "zebra: dirs must be a table")
+		for pat, rule in pairs(opts.dirs) do
+			assert(type(pat) == "string" and pat ~= "", "zebra: dirs keys must be non-empty path patterns")
+			if rule ~= false then
+				assert(type(rule) == "table", "zebra: dirs[" .. pat .. "] must be false or a table")
+				for _, pane in ipairs({ "current", "parent", "preview" }) do
+					if rule[pane] ~= nil then
+						compile(rule[pane], "dirs[" .. pat .. "]." .. pane)
+					end
+				end
+				if rule.panes ~= nil then
+					assert(type(rule.panes) == "table", "zebra: dirs[" .. pat .. "].panes must be a table")
+					for _, pane in ipairs({ "current", "parent", "preview" }) do
+						assert(
+							rule.panes[pane] == nil or type(rule.panes[pane]) == "boolean",
+							"zebra: dirs[" .. pat .. "].panes." .. pane .. " must be a boolean"
+						)
+					end
+				end
+			end
+		end
+	end
+	self._dirs = opts.dirs or {}
+
 	assert(opts.on_file == nil or type(opts.on_file) == "function", "zebra: on_file must be a function or nil")
 	self._on_file = opts.on_file
 

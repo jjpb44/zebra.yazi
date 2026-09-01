@@ -100,6 +100,44 @@ preview = { {}, {}, { lighten = 0.06 }, {} },
 | ![current-only](screenshots/current-only.png) | ![preview](screenshots/preview.png) |
 | `current` only | `preview` only |
 
+### Per-directory rules
+
+`dirs` maps a path pattern (Lua pattern, `~` expands) to `false` (stripes off)
+or an override table. Rules match the listing directory of each pane and cover
+subdirectories:
+
+```lua
+dirs = {
+  ["~/dotfiles"] = false,                              -- off here and below
+  [".*/mnt/remote/.*"] = false,                        -- pattern match
+  ["*/projects/*"] = { current = { {}, { lighten = 0.06 } } },  -- different pattern
+}
+```
+
+Override tables accept the same keys as `setup` (`rows`, `current`, `parent`,
+`preview`, `panes`). First matching rule wins; a literal path also matches
+exactly or as a path prefix.
+
+### Runtime toggles
+
+`toggle` flips stripes on/off globally; `toggle-pane` flips one pane. Bind them
+in `keymap.toml`:
+
+```toml
+[[mgr.prepend_keymap]]
+on = ["U", "z"]
+run = "plugin zebra --sync toggle"
+desc = "Toggle zebra stripes"
+
+[[mgr.prepend_keymap]]
+on = ["U", "p"]
+run = "plugin zebra --sync toggle-pane preview"
+desc = "Toggle preview stripes"
+```
+
+`toggle-pane` takes `current`, `parent` or `preview`. Toggles last until Yazi
+restarts; the configured pattern is preserved.
+
 ## Base
 
 `darken`/`lighten` blend against `base`. The plugin resolves it in this order:
