@@ -8,8 +8,12 @@ alternate rows against your theme's background. Stock Yazi, no fork, no build.
 ## Install
 
 ```sh
-ya pkg add jjpb/zebra
+git clone https://codeberg.org/jjpb/zebra.yazi \
+  ~/.config/yazi/plugins/zebra.yazi
 ```
+
+> `ya pkg` currently only installs from GitHub (hardcoded upstream), so a plain
+> clone is the way until this repo is mirrored there.
 
 Then add to `~/.config/yazi/init.lua`:
 
