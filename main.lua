@@ -469,12 +469,19 @@ function M:setup(opts)
 	end
 end
 
+-- ps.sub callbacks don't schedule a repaint; app:theme is the only Lua-reachable
+-- command with an unconditional render, and re-applying the current theme is a no-op.
+local function repaint()
+	pcall(ya.emit, "app:theme", {})
+end
+
 function M:_command(cmd, arg)
 	if cmd == "toggle" then
 		self._enabled = not self._enabled
 		if self._persist then
 			pcall(state_save, self)
 		end
+		repaint()
 		pcall(ya.notify, {
 			title = "zebra",
 			content = self._enabled and "stripes on" or "stripes off",
@@ -495,6 +502,7 @@ function M:_command(cmd, arg)
 		if self._persist then
 			pcall(state_save, self)
 		end
+		repaint()
 		pcall(ya.notify, {
 			title = "zebra",
 			content = arg .. " stripes " .. (self._panes[arg] and "on" or "off"),
