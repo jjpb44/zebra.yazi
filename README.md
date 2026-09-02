@@ -135,8 +135,9 @@ run = "plugin zebra --sync toggle-pane preview"
 desc = "Toggle preview stripes"
 ```
 
-`toggle-pane` takes `current`, `parent` or `preview`. Toggles last until Yazi
-restarts; the configured pattern is preserved.
+`toggle-pane` takes `current`, `parent` or `preview`. Toggle state is persisted
+to `~/.local/state/yazi/zebra.state` and restored on the next start. Opt out
+with `persist = false` in `setup()`; the configured pattern itself is preserved.
 
 ## Base
 

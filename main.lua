@@ -1,3 +1,4 @@
+--- @sync entry
 -- zebra.yazi: zebra-stripe rows in the file list.
 -- Stock yazi only. No config outside `setup()`.
 
@@ -309,14 +310,62 @@ function M:_patch()
 	self._patched = true
 end
 
--- Command entry: `plugin zebra [--sync] toggle` / `plugin zebra [--sync] toggle-pane current|parent|preview`.
--- The command loader runs a fresh copy of this file; mutate the LIVE module
--- (the one user setup() configured) so the installed render hooks see it.
-function M:entry(job)
-	local live = package.loaded and package.loaded.zebra
-	if not (live and live ~= M and live._patched) then
-		live = M
+-- Toggle persistence: ~/.local/state/yazi/zebra.state, plain key=value lines.
+local function state_path()
+	local xdg = os.getenv("XDG_STATE_HOME")
+	if xdg and xdg ~= "" then
+		return xdg .. "/yazi/zebra.state"
 	end
+	local home = os.getenv("HOME")
+	return home and (home .. "/.local/state/yazi/zebra.state") or nil
+end
+
+local function state_load()
+	local p = state_path()
+	if not p then
+		return nil
+	end
+	local f = io.open(p, "r")
+	if not f then
+		return nil
+	end
+	local t = {}
+	for line in f:lines() do
+		local k, v = line:match("^(%w+)=(%w+)$")
+		if k then
+			t[k] = v == "true"
+		end
+	end
+	f:close()
+	return t
+end
+
+local function state_save(mod)
+	local p = state_path()
+	if not p then
+		return
+	end
+	local f = io.open(p, "w")
+	if not f then
+		return
+	end
+	f:write(
+		string.format(
+			"enabled=%s\nparent=%s\ncurrent=%s\npreview=%s\n",
+			tostring(mod._enabled),
+			tostring(mod._panes.parent),
+			tostring(mod._panes.current),
+			tostring(mod._panes.preview)
+		)
+	)
+	f:close()
+end
+
+-- Command entry: `plugin zebra [--sync] toggle` / `plugin zebra [--sync] toggle-pane current|parent|preview`.
+-- The command loader runs this file in a fresh sandbox (own _G/package), so it
+-- must not mutate module state directly; it publishes over ps and the
+-- setup-side subscriber (same Lua state as the render hooks) does the work.
+function M:entry(job)
 	local a = job.args
 	local cmd, arg
 	if type(a) == "table" then
@@ -324,42 +373,10 @@ function M:entry(job)
 	else
 		cmd, arg = tostring(a or ""):match("^(%S*)%s*(.-)%s*$")
 	end
-	if cmd == "toggle" then
-		live._enabled = not live._enabled
-		pcall(ya.notify, {
-			title = "zebra",
-			content = live._enabled and "stripes on" or "stripes off",
-			level = "info",
-			timeout = 1,
-		})
-	elseif cmd == "toggle-pane" then
-		if live._panes[arg] == nil then
-			pcall(ya.notify, {
-				title = "zebra",
-				content = "usage: toggle-pane current|parent|preview",
-				level = "warn",
-				timeout = 2,
-			})
-			return
-		end
-		live._panes[arg] = not live._panes[arg]
-		pcall(ya.notify, {
-			title = "zebra",
-			content = arg .. " stripes " .. (live._panes[arg] and "on" or "off"),
-			level = "info",
-			timeout = 1,
-		})
-	else
-		pcall(ya.notify, {
-			title = "zebra",
-			content = "usage: toggle | toggle-pane current|parent|preview",
-			level = "warn",
-			timeout = 2,
-		})
-	end
+	ps.pub("zebra", { cmd = cmd, arg = arg })
 end
 
----@param opts { base?: string, rows?: table[], current?: table[], parent?: table[], preview?: table[], panes?: { parent?: boolean, current?: boolean, preview?: boolean }, dirs?: { [string]: boolean|table }, on_file?: fun(file: userdata, default: userdata?): userdata? }
+---@param opts { base?: string, rows?: table[], current?: table[], parent?: table[], preview?: table[], panes?: { parent?: boolean, current?: boolean, preview?: boolean }, dirs?: { [string]: boolean|table }, on_file?: fun(file: userdata, default: userdata?): userdata?, persist?: boolean }
 function M:setup(opts)
 	opts = opts or {}
 	assert(opts.base == nil or type(opts.base) == "string", "zebra: base must be a hex string or nil")
@@ -410,6 +427,22 @@ function M:setup(opts)
 	assert(opts.on_file == nil or type(opts.on_file) == "function", "zebra: on_file must be a function or nil")
 	self._on_file = opts.on_file
 
+	assert(opts.persist == nil or type(opts.persist) == "boolean", "zebra: persist must be a boolean")
+	self._persist = opts.persist ~= false
+	if self._persist then
+		local st = state_load()
+		if st then
+			if st.enabled ~= nil then
+				self._enabled = st.enabled
+			end
+			for _, name in ipairs({ "parent", "current", "preview" }) do
+				if st[name] ~= nil then
+					self._panes[name] = st[name]
+				end
+			end
+		end
+	end
+
 	if not self._base then
 		for _, list in ipairs({ self._rows, self._current, self._parent, self._preview }) do
 			if has_relative(list) then
@@ -425,6 +458,57 @@ function M:setup(opts)
 		end
 	end
 	self:_patch()
+
+	-- Toggle commands arrive via ps from entry() (command sandbox cannot reach
+	-- this module instance directly).
+	if not self._subscribed then
+		self._subscribed = true
+		ps.sub("zebra", function(body)
+			self:_command(body and body.cmd or "", body and body.arg)
+		end)
+	end
+end
+
+function M:_command(cmd, arg)
+	if cmd == "toggle" then
+		self._enabled = not self._enabled
+		if self._persist then
+			pcall(state_save, self)
+		end
+		pcall(ya.notify, {
+			title = "zebra",
+			content = self._enabled and "stripes on" or "stripes off",
+			level = "info",
+			timeout = 1,
+		})
+	elseif cmd == "toggle-pane" then
+		if self._panes[arg] == nil then
+			pcall(ya.notify, {
+				title = "zebra",
+				content = "usage: toggle-pane current|parent|preview",
+				level = "warn",
+				timeout = 2,
+			})
+			return
+		end
+		self._panes[arg] = not self._panes[arg]
+		if self._persist then
+			pcall(state_save, self)
+		end
+		pcall(ya.notify, {
+			title = "zebra",
+			content = arg .. " stripes " .. (self._panes[arg] and "on" or "off"),
+			level = "info",
+			timeout = 1,
+		})
+	else
+		pcall(ya.notify, {
+			title = "zebra",
+			content = "usage: toggle | toggle-pane current|parent|preview",
+			level = "warn",
+			timeout = 2,
+		})
+	end
 end
 
 return M
