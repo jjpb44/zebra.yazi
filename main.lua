@@ -8,7 +8,6 @@ local M = {
 	_current = {},
 	_parent = {},
 	_preview = {},
-	_panes = { parent = true, current = true, preview = true },
 	_dirs = {},
 	_enabled = true,
 	_on_file = nil,
@@ -257,9 +256,6 @@ local function pick(file)
 		return nil
 	end
 	local pane = pane_of(file)
-	if not M._panes[pane] then
-		return nil
-	end
 	local rule = dir_of(pane) and dir_rule(dir_of(pane))
 	if rule == false then
 		return nil
@@ -349,15 +345,7 @@ local function state_save(mod)
 	if not f then
 		return
 	end
-	f:write(
-		string.format(
-			"enabled=%s\nparent=%s\ncurrent=%s\npreview=%s\n",
-			tostring(mod._enabled),
-			tostring(mod._panes.parent),
-			tostring(mod._panes.current),
-			tostring(mod._panes.preview)
-		)
-	)
+	f:write(string.format("enabled=%s\n", tostring(mod._enabled)))
 	f:close()
 end
 
@@ -376,7 +364,7 @@ function M:entry(job)
 	ps.pub("zebra", { cmd = cmd, arg = arg })
 end
 
----@param opts { base?: string, rows?: table[], current?: table[], parent?: table[], preview?: table[], panes?: { parent?: boolean, current?: boolean, preview?: boolean }, dirs?: { [string]: boolean|table }, on_file?: fun(file: userdata, default: userdata?): userdata?, persist?: boolean }
+---@param opts { base?: string, rows?: table[], current?: table[], parent?: table[], preview?: table[], dirs?: { [string]: boolean|table }, on_file?: fun(file: userdata, default: userdata?): userdata?, persist?: boolean }
 function M:setup(opts)
 	opts = opts or {}
 	assert(opts.base == nil or type(opts.base) == "string", "zebra: base must be a hex string or nil")
@@ -384,15 +372,6 @@ function M:setup(opts)
 		parse_hex(opts.base, "base")
 	end
 	self._base = opts.base or theme_bg()
-
-	if opts.panes ~= nil then
-		assert(type(opts.panes) == "table", "zebra: panes must be a table")
-		for _, name in ipairs({ "parent", "current", "preview" }) do
-			local v = opts.panes[name]
-			assert(v == nil or type(v) == "boolean", "zebra: panes." .. name .. " must be a boolean")
-			self._panes[name] = v ~= false
-		end
-	end
 
 	self._rows = compile(opts.rows or {}, "rows")
 	self._current = compile(opts.current or {}, "current")
@@ -410,15 +389,6 @@ function M:setup(opts)
 						compile(rule[pane], "dirs[" .. pat .. "]." .. pane)
 					end
 				end
-				if rule.panes ~= nil then
-					assert(type(rule.panes) == "table", "zebra: dirs[" .. pat .. "].panes must be a table")
-					for _, pane in ipairs({ "current", "parent", "preview" }) do
-						assert(
-							rule.panes[pane] == nil or type(rule.panes[pane]) == "boolean",
-							"zebra: dirs[" .. pat .. "].panes." .. pane .. " must be a boolean"
-						)
-					end
-				end
 			end
 		end
 	end
@@ -434,11 +404,6 @@ function M:setup(opts)
 		if st then
 			if st.enabled ~= nil then
 				self._enabled = st.enabled
-			end
-			for _, name in ipairs({ "parent", "current", "preview" }) do
-				if st[name] ~= nil then
-					self._panes[name] = st[name]
-				end
 			end
 		end
 	end
@@ -488,31 +453,10 @@ function M:_command(cmd, arg)
 			level = "info",
 			timeout = 1,
 		})
-	elseif cmd == "toggle-pane" then
-		if self._panes[arg] == nil then
-			pcall(ya.notify, {
-				title = "zebra",
-				content = "usage: toggle-pane current|parent|preview",
-				level = "warn",
-				timeout = 2,
-			})
-			return
-		end
-		self._panes[arg] = not self._panes[arg]
-		if self._persist then
-			pcall(state_save, self)
-		end
-		repaint()
-		pcall(ya.notify, {
-			title = "zebra",
-			content = arg .. " stripes " .. (self._panes[arg] and "on" or "off"),
-			level = "info",
-			timeout = 1,
-		})
 	else
 		pcall(ya.notify, {
 			title = "zebra",
-			content = "usage: toggle | toggle-pane current|parent|preview",
+			content = "usage: toggle",
 			level = "warn",
 			timeout = 2,
 		})

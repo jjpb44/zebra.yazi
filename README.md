@@ -42,9 +42,6 @@ require("zebra"):setup({
   current = { ... },     -- override for the current pane
   parent  = { ... },     -- override for the parent pane
   preview = { ... },     -- override for the preview pane
-  panes   = {            -- hard on/off gates per pane
-    parent = true, current = true, preview = true,
-  },
   on_file = nil,         -- optional: function(file, default) -> style?
 })
 ```
@@ -82,7 +79,7 @@ rows = { {}, {}, { lighten = 0.05 }, { lighten = 0.05 } },
 ### Per-pane patterns
 
 `current`, `parent` and `preview` override `rows` for that pane (empty or
-missing → falls back to `rows`). `panes.*` hard-disables a pane regardless.
+missing → falls back to `rows`).
 
 Stripes only in the current pane:
 
@@ -90,18 +87,6 @@ Stripes only in the current pane:
 rows = {},
 current = { {}, { lighten = 0.08 } },
 ```
-
-Different pattern in the preview pane:
-
-```lua
-rows = { {}, { lighten = 0.03 } },
-preview = { {}, {}, { lighten = 0.06 }, {} },
-```
-
-| | |
-|---|---|
-| ![current-only](screenshots/current-only.png) | ![preview](screenshots/preview.png) |
-| `current` only | `preview` only |
 
 ### Per-directory rules
 
@@ -118,29 +103,23 @@ dirs = {
 ```
 
 Override tables accept the same keys as `setup` (`rows`, `current`, `parent`,
-`preview`, `panes`). First matching rule wins; a literal path also matches
+`preview`). First matching rule wins; a literal path also matches
 exactly or as a path prefix.
 
 ### Runtime toggles
 
-`toggle` flips stripes on/off globally; `toggle-pane` flips one pane. Bind them
-in `keymap.toml`:
+`toggle` flips stripes on/off globally. Bind it in `keymap.toml`:
 
 ```toml
 [[mgr.prepend_keymap]]
 on = ["U", "z"]
 run = "plugin zebra --sync toggle"
 desc = "Toggle zebra stripes"
-
-[[mgr.prepend_keymap]]
-on = ["U", "p"]
-run = "plugin zebra --sync toggle-pane preview"
-desc = "Toggle preview stripes"
 ```
 
-`toggle-pane` takes `current`, `parent` or `preview`. Toggle state is persisted
-to `~/.local/state/yazi/zebra.state` and restored on the next start. Opt out
-with `persist = false` in `setup()`; the configured pattern itself is preserved.
+Toggle state is persisted to `~/.local/state/yazi/zebra.state` and restored
+on the next start. Opt out with `persist = false` in `setup()`; the configured
+pattern itself is preserved.
 
 ## Base
 
