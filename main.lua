@@ -434,10 +434,10 @@ function M:setup(opts)
 	end
 end
 
--- ps.sub callbacks don't schedule a repaint; app:theme is the only Lua-reachable
+-- ps.sub callbacks don't schedule a repaint; app:resize forces a full re-layout + row repaint (app:theme alone doesn' repaint rows)
 -- command with an unconditional render, and re-applying the current theme is a no-op.
 local function repaint()
-	pcall(ya.emit, "app:theme", {})
+	pcall(ya.emit, "app:resize", {})
 end
 
 function M:_command(cmd, arg)
