@@ -1,7 +1,8 @@
 # zebra.yazi
 
-Zebra-striped rows for [Yazi](https://github.com/sxyazi/yazi) — lighten or darken
-alternate rows against your theme's background. Stock Yazi, no fork, no build.
+Zebra-striped rows for [Yazi](https://github.com/sxyazi/yazi) — alternate row
+backgrounds against your theme. Stock Yazi, no fork, no build. Pairs
+naturally with [fage.yazi](https://github.com/jjpb44/fage.yazi).
 
 ![subtle](screenshots/subtle.png)
 
@@ -29,33 +30,18 @@ require("zebra"):setup({
 
 Restart Yazi.
 
-**Where does `base` come from?** `base` is the color the stripes are derived
-from. You can set it explicitly, or let the plugin pick it up from your theme —
-see [Base](#base) below.
-
-## Config
-
-```lua
-require("zebra"):setup({
-  base    = "#1e1e2e",   -- background to derive stripes from (see Base)
-  rows    = { ... },     -- default pattern for all panes
-  current = { ... },     -- override for the current pane
-  parent  = { ... },     -- override for the parent pane
-  preview = { ... },     -- override for the preview pane
-  on_file = nil,         -- optional: function(file, default) -> style?
-})
-```
-
-### Rows — the stripe pattern
+## Quick start
 
 `rows` is a list cycled by row index. Every entry is one row-slot in the
 repeating pattern:
 
-- `{}` — plain row, no stripe
-- `{ lighten = 0.03 }` — background lightened by 3%
-- `{ darken = 0.35 }` — background darkened by 35%
-- `{ bg = "#3a3a5c" }` — absolute color, no blending
-- entries also accept any `ui.Style` field: `fg`, `bold`, `italic`, …
+| Entry                       | Effect                                 |
+|-----------------------------|----------------------------------------|
+| `{}`                        | plain row, no stripe                   |
+| `{ lighten = 0.03 }`        | background lightened by 3%             |
+| `{ darken  = 0.35 }`        | background darkened  by 35%            |
+| `{ bg = "#3a3a5c" }`        | absolute color, no blending            |
+| any `ui.Style` field        | `fg`, `bold`, `italic`, …              |
 
 Classic zebra (every other row):
 
@@ -76,39 +62,41 @@ rows = { {}, {}, { lighten = 0.05 }, { lighten = 0.05 } },
 | ![contrast](screenshots/contrast.png) | ![pattern](screenshots/pattern.png) |
 | absolute `bg` (high contrast) | 2-of-4 pattern |
 
-### Per-pane patterns
-
-`current`, `parent` and `preview` override `rows` for that pane (empty or
-missing → falls back to `rows`).
-
-Stripes only in the current pane:
+## Config
 
 ```lua
-rows = {},
-current = { {}, { lighten = 0.08 } },
+require("zebra"):setup({
+  base    = "#1e1e2e",
+  rows    = { ... },     -- default pattern for all panes
+  current = { ... },     -- override for the current pane
+  parent  = { ... },     -- override for the parent pane
+  preview = { ... },     -- override for the preview pane
+  on_file = nil,         -- optional: function(file, default) -> style?
+  enabled = true,        -- false = fully inert (see "Run only in some apps")
+})
 ```
+
+### Per-pane patterns
+
+`current`, `parent`, `preview` override `rows` for that pane. Empty or
+missing falls back to `rows`.
 
 ### Per-directory rules
 
-`dirs` maps a path pattern (Lua pattern, `~` expands) to `false` (stripes off)
-or an override table. Rules match the listing directory of each pane and cover
-subdirectories:
+`dirs` maps a path pattern (`~` expands, otherwise Lua pattern) to `false`
+(stripes off) or an override table:
 
 ```lua
 dirs = {
-  ["~/dotfiles"] = false,                              -- off here and below
-  [".*/mnt/remote/.*"] = false,                        -- pattern match
-  ["*/projects/*"] = { current = { {}, { lighten = 0.06 } } },  -- different pattern
+  ["~/dotfiles"]      = false,
+  [".*/mnt/remote/.*"] = false,
+  ["*/projects/*"]    = { current = { {}, { lighten = 0.06 } } },
 }
 ```
 
-Override tables accept the same keys as `setup` (`rows`, `current`, `parent`,
-`preview`). First matching rule wins; a literal path also matches
-exactly or as a path prefix.
+First matching rule wins. A literal path also matches exactly or as a prefix.
 
-### Runtime toggles
-
-`toggle` flips stripes on/off globally. Bind it in `keymap.toml`:
+## Toggle
 
 ```toml
 [[mgr.prepend_keymap]]
@@ -117,33 +105,46 @@ run = "plugin zebra --sync toggle"
 desc = "Toggle zebra stripes"
 ```
 
-Toggle state is persisted to `~/.local/state/yazi/zebra.state` and restored
-on the next start. Opt out with `persist = false` in `setup()`; the configured
-pattern itself is preserved.
+State persists to `~/.local/state/yazi/zebra.state`. Opt out with
+`persist = false` in `setup()`.
 
 ## Base
 
-`darken`/`lighten` blend against `base`. The plugin resolves it in this order:
+`darken` / `lighten` blend against `base`. Resolved in order:
 
 1. explicit `base = "#rrggbb"` in `setup()`
 2. `[app] overall` in your `theme.toml`
 3. `[app] overall` in the active flavor (`flavor.toml`)
+4. approximate: a typical dark (`#1e1e2e`) or light (`#e8e8e8`) background,
+   chosen by the terminal's light/dark report
 
-If none is found, absolute-color entries still work, and `darken`/`lighten`
-entries are skipped with a one-time notice.
+The exact terminal background is unobtainable from a plugin (yazi's spawned
+processes have no controlling terminal), so step 4 is a best guess — stripes
+appear and both blend directions stay visible, but pin `base` for exact
+colors on themeless terminals.
 
-## Priority
+## Run only in some apps
 
-Stripes lose to everything Yazi already emphasizes — hovered row, selection,
-marker pills keep their own styles. The stripe is a background underlay:
+`enabled = false` makes the plugin fully inert (no styling, no state file, no
+commands). Combine with an environment variable to gate it per launcher —
+e.g. only when started from a desktop entry:
 
-hovered > filetype/marker > stripe > plain.
+```ini
+# yazi.desktop
+Exec=env YAZI_STYLING=1 yazi
+```
+
+```lua
+require("zebra"):setup({
+  enabled = os.getenv("YAZI_STYLING") == "1",
+  rows = { {}, { lighten = 0.03 } },
+})
+```
 
 ## Extension
 
 `on_file` lets you restyle per file — return a style to override the pattern,
-or `default` to keep it. Anything you can express in Lua works (per-directory,
-time-based, per-extension…):
+or `default` to keep it:
 
 ```lua
 require("zebra"):setup({
@@ -151,16 +152,39 @@ require("zebra"):setup({
   rows = { {}, { lighten = 0.03 } },
   on_file = function(file, default)
     if file.name == "DRAFT.md" then
-      return ui.Style():fg("#ff0000")  -- flag drafts, no stripe
+      return ui.Style():fg("#ff0000")
     end
     return default
   end,
 })
 ```
 
+## Priority
+
+Stripes lose to everything Yazi emphasizes — hovered row, selection, marker
+pills keep their own styles. The stripe is a background underlay:
+
+```
+hovered > filetype/marker > stripe > plain
+```
+
+## Troubleshooting
+
+- **Toggling does nothing** — make sure your yazi session was started **after**
+  the keymap / main.lua changed. Yazi reads both only at startup.
+- **No stripes, but no error either** — check `~/.local/state/yazi/zebra.state`
+  (delete it to reset). A stale `enabled=false` keeps the plugin disabled.
+- **Stripes look slightly off, no theme installed** — the base is approximated
+  from the terminal's light/dark report (see Base, step 4). Pin
+  `base = "#rrggbb"` for exact colors.
+- **Stripes everywhere including the directory badge** — that's the parent
+  pane's cwd pill (Yazi's own component, not `Entity:style`). It's always
+  unpainted, by design.
+
 ## Limitations
 
-- The leftmost marker column is rendered by a separate component and is not striped.
+- The leftmost marker column is rendered by a separate component and is not
+  striped.
 - Stripes anchor to the entry index, so they stay stable while scrolling.
 - Yazi's own directory badge (the parent pane's cwd pill) is not striped.
 

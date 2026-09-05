@@ -136,6 +136,21 @@ local function theme_bg()
 	return nil
 end
 
+-- Last resort when no theme/flavor sets a bg: approximate from the terminal's
+-- light/dark report. The exact color is unobtainable from a plugin (yazi's
+-- Command children have no controlling tty and read() on the real tty device
+-- fails with EIO), so pick a typical dark/light bg that keeps both blend
+-- directions visible.
+local function fallback_base()
+	local ok, is_light = pcall(function()
+		return rt.term.light() == true
+	end)
+	if ok and is_light then
+		return "#e8e8e8"
+	end
+	return "#1e1e2e"
+end
+
 -- Validate an entry fully at setup time; render-time code must never throw.
 local function validate(entry, path)
 	assert(type(entry) == "table", "zebra: " .. path .. " must be a table")
@@ -181,15 +196,6 @@ local function build(entry)
 		end
 	end
 	return s
-end
-
-local function has_relative(list)
-	for _, e in ipairs(list) do
-		if e.darken ~= nil or e.lighten ~= nil then
-			return true
-		end
-	end
-	return false
 end
 
 --- Internal: pick stripe style for a file. Honors pane visibility, per-pane
@@ -364,14 +370,18 @@ function M:entry(job)
 	ps.pub("zebra", { cmd = cmd, arg = arg })
 end
 
----@param opts { base?: string, rows?: table[], current?: table[], parent?: table[], preview?: table[], dirs?: { [string]: boolean|table }, on_file?: fun(file: userdata, default: userdata?): userdata?, persist?: boolean }
+---@param opts { base?: string, rows?: table[], current?: table[], parent?: table[], preview?: table[], dirs?: { [string]: boolean|table }, on_file?: fun(file: userdata, default: userdata?): userdata?, persist?: boolean, enabled?: boolean }
 function M:setup(opts)
 	opts = opts or {}
+	assert(opts.enabled == nil or type(opts.enabled) == "boolean", "zebra: enabled must be a boolean")
+	if opts.enabled == false then
+		return -- app gating: stay fully inert (no wraps, no state, no commands)
+	end
 	assert(opts.base == nil or type(opts.base) == "string", "zebra: base must be a hex string or nil")
 	if opts.base then
 		parse_hex(opts.base, "base")
 	end
-	self._base = opts.base or theme_bg()
+	self._base = opts.base or theme_bg() or fallback_base()
 
 	self._rows = compile(opts.rows or {}, "rows")
 	self._current = compile(opts.current or {}, "current")
@@ -408,20 +418,6 @@ function M:setup(opts)
 		end
 	end
 
-	if not self._base then
-		for _, list in ipairs({ self._rows, self._current, self._parent, self._preview }) do
-			if has_relative(list) then
-				pcall(ya.notify, {
-					title = "zebra",
-					content = 'No bg for darken/lighten. Set `base = "#rrggbb"` in setup(), '
-						.. "or use a theme/flavor with `[app] overall`.",
-					level = "warn",
-					timeout = 5,
-				})
-				break
-			end
-		end
-	end
 	self:_patch()
 
 	-- Toggle commands arrive via ps from entry() (command sandbox cannot reach
